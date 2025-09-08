@@ -20,11 +20,11 @@
     <div id="main-container" class="bg-white rounded-xl shadow-2xl p-8 w-full max-w-2xl transform transition-transform duration-300">
 
         <!-- Header -->
-        <h1 class="text-3xl font-bold text-center mb-6 text-gray-800">Crea Appuntamenti Condivisibili</h1>
-        <p class="text-center text-gray-600 mb-8">Gestisci gli appuntamenti di gruppo direttamente dal tuo Google Calendar.</p>
+        <h1 id="main-title" class="text-3xl font-bold text-center mb-6 text-gray-800">Crea Appuntamenti Condivisibili</h1>
+        <p id="main-subtitle" class="text-center text-gray-600 mb-8">Gestisci gli appuntamenti di gruppo direttamente dal tuo Google Calendar.</p>
 
         <!-- Google Sign-In Button -->
-        <div id="auth-buttons" class="flex justify-center">
+        <div id="auth-buttons" class="flex justify-center hidden">
             <button id="authorize_button" class="bg-blue-600 text-white font-semibold py-3 px-6 rounded-full shadow-lg hover:bg-blue-700 transition duration-300 transform hover:scale-105">
                 Accedi con Google
             </button>
@@ -39,7 +39,7 @@
             </div>
 
             <!-- Calendar Owner View -->
-            <div id="owner-view" class="space-y-6">
+            <div id="owner-view" class="space-y-6 hidden">
                 <!-- Calendar Selector -->
                 <div>
                     <label for="calendar-select" class="block text-lg font-medium text-gray-700 mb-2">Seleziona Calendario</label>
@@ -152,6 +152,8 @@
         let calendars = [];
 
         // Elementi DOM
+        const mainTitle = document.getElementById('main-title');
+        const mainSubtitle = document.getElementById('main-subtitle');
         const authButtons = document.getElementById('auth-buttons');
         const authorizeButton = document.getElementById('authorize_button');
         const appContent = document.getElementById('app-content');
@@ -218,11 +220,23 @@
         // Controlla se le librerie sono pronte e abilita il pulsante di autorizzazione
         function maybeEnableButtons() {
             if (gapiInited && gisInited) {
-                authorizeButton.onclick = handleAuthClick;
-                authButtons.classList.remove('hidden');
+                const params = new URLSearchParams(window.location.search);
+                const isBooking = params.get('isBooking');
+                
+                if (isBooking) {
+                    mainTitle.textContent = "Prenota il tuo slot appuntamento";
+                    mainSubtitle.textContent = "Accedi con il tuo account Google per visualizzare i dettagli.";
+                    authButtons.classList.remove('hidden');
+                    authorizeButton.onclick = handleAuthClick;
+                } else {
+                    mainTitle.textContent = "Crea Appuntamenti Condivisibili";
+                    mainSubtitle.textContent = "Gestisci gli appuntamenti di gruppo direttamente dal tuo Google Calendar.";
+                    authButtons.classList.remove('hidden');
+                    authorizeButton.onclick = handleAuthClick;
+                }
             }
         }
-
+        
         // Gestisce il flusso di autorizzazione
         function handleAuthClick() {
             tokenClient.callback = async (resp) => {
@@ -232,7 +246,22 @@
                 authButtons.classList.add('hidden');
                 appContent.classList.remove('hidden');
                 loadingDiv.classList.remove('hidden');
-                await listCalendars();
+
+                const params = new URLSearchParams(window.location.search);
+                const bookingId = params.get('bookingId');
+                const calendarId = params.get('calendarId');
+                const isBooking = params.get('isBooking');
+
+                if (isBooking && bookingId && calendarId) {
+                    ownerView.classList.add('hidden');
+                    guestView.classList.remove('hidden');
+                    await handleGuestView(bookingId, calendarId);
+                } else {
+                    ownerView.classList.remove('hidden');
+                    guestView.classList.add('hidden');
+                    await listCalendars();
+                }
+
                 loadingDiv.classList.add('hidden');
             };
 
@@ -497,11 +526,6 @@
 
         // Inizializzazione quando il DOM è pronto
         window.onload = () => {
-            const params = new URLSearchParams(window.location.search);
-            const bookingId = params.get('bookingId');
-            const calendarId = params.get('calendarId');
-            const isBooking = params.get('isBooking');
-
             // Avvia il caricamento delle librerie
             gapi.load('client', gapiLoaded);
             window.gapiLoaded = gapiLoaded;
@@ -511,21 +535,24 @@
             script.onload = gisLoaded;
             document.head.appendChild(script);
 
-            // Controlla se la pagina è in modalità di prenotazione
+            const params = new URLSearchParams(window.location.search);
+            const bookingId = params.get('bookingId');
+            const calendarId = params.get('calendarId');
+            const isBooking = params.get('isBooking');
+
             if (isBooking) {
-                if (bookingId && calendarId) {
-                    ownerView.classList.add('hidden');
-                    guestView.classList.remove('hidden');
-                    handleGuestView(bookingId, calendarId);
-                } else {
+                if (!bookingId || !calendarId) {
                     showMessage("Link Incompleto", "Il link di prenotazione è incompleto. Assicurati di copiare e condividere l'intero URL generato dall'applicazione.");
-                    ownerView.classList.remove('hidden');
+                    authButtons.classList.remove('hidden');
+                } else {
+                    ownerView.classList.add('hidden');
                     guestView.classList.add('hidden');
+                    authButtons.classList.remove('hidden');
                 }
             } else {
-                // Mostra la vista del proprietario
-                ownerView.classList.remove('hidden');
+                ownerView.classList.add('hidden');
                 guestView.classList.add('hidden');
+                authButtons.classList.remove('hidden');
             }
         };
 
