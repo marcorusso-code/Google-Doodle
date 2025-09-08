@@ -118,33 +118,30 @@
 
         </div>
     </div>
+    <!-- Firebase Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, addDoc, setDoc, getDoc, onSnapshot, collection, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-    <script>
         /*
-         * IMPORTANTE: E' NECESSARIO INSERIRE LE TUE CREDENZIALI API QUI!
-         * Questo codice utilizza dei valori segnaposto che non funzionano.
-         * Per ottenere le tue credenziali:
-         *
-         * 1. Vai alla Console API di Google: 
-         * https://console.cloud.google.com/
-         *
-         * 2. Crea un nuovo progetto.
-         *
-         * 3. Abilita l'API di Google Calendar per il tuo progetto.
-         *
-         * 4. Vai alla sezione "Credenziali" e crea un'ID client OAuth 2.0.
-         * Assicurati di configurare l'URI di reindirizzamento per `http://localhost`.
-         *
-         * 5. Crea una "Chiave API".
-         *
-         * 6. Sostituisci i valori segnaposto qui sotto con le tue credenziali.
+         * Variabili globali per l'ambiente Canvas. NON MODIFICARE.
          */
-        const CLIENT_ID = '1062046351666-cnbek28i76lgqbte85ssre7a3qui9gl1.apps.googleusercontent.com'; // Sostituisci questo
-        const API_KEY = 'AIzaSyASCrBXFbsyZdk-tLbAVWRwce4lGaZ5XjU'; // Sostituisci questo
-        // Scopi richiesti per l'API di Google Calendar
-        const SCOPES = 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly';
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
-        // Variabili globali
+        let db, auth;
+
+        // Inizializzazione Firebase
+        if (firebaseConfig) {
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+        } else {
+            console.error("Firebase config non disponibile.");
+        }
+        
         let gapiInited = false;
         let gisInited = false;
         let tokenClient;
@@ -211,7 +208,7 @@
             tokenClient = google.accounts.oauth2.initTokenClient({
                 client_id: CLIENT_ID,
                 scope: SCOPES,
-                callback: '', // Sostituita dalla chiamata di handleAuthResult
+                callback: '',
             });
             gisInited = true;
             maybeEnableButtons();
@@ -226,17 +223,15 @@
                 if (isBooking) {
                     mainTitle.textContent = "Prenota il tuo slot appuntamento";
                     mainSubtitle.textContent = "Accedi con il tuo account Google per visualizzare i dettagli.";
-                    authButtons.classList.remove('hidden');
-                    authorizeButton.onclick = handleAuthClick;
                 } else {
                     mainTitle.textContent = "Crea Appuntamenti Condivisibili";
                     mainSubtitle.textContent = "Gestisci gli appuntamenti di gruppo direttamente dal tuo Google Calendar.";
-                    authButtons.classList.remove('hidden');
-                    authorizeButton.onclick = handleAuthClick;
                 }
+                authButtons.classList.remove('hidden');
+                authorizeButton.onclick = handleAuthClick;
             }
         }
-        
+
         // Gestisce il flusso di autorizzazione
         function handleAuthClick() {
             tokenClient.callback = async (resp) => {
@@ -249,13 +244,12 @@
 
                 const params = new URLSearchParams(window.location.search);
                 const bookingId = params.get('bookingId');
-                const calendarId = params.get('calendarId');
                 const isBooking = params.get('isBooking');
 
-                if (isBooking && bookingId && calendarId) {
+                if (isBooking && bookingId) {
                     ownerView.classList.add('hidden');
                     guestView.classList.remove('hidden');
-                    await handleGuestView(bookingId, calendarId);
+                    await handleGuestView(bookingId);
                 } else {
                     ownerView.classList.remove('hidden');
                     guestView.classList.add('hidden');
@@ -323,12 +317,6 @@
                     summary: title,
                     start: { dateTime: new Date(start).toISOString() },
                     end: { dateTime: new Date(end).toISOString() },
-                    extendedProperties: {
-                        shared: {
-                            capacity: capacity,
-                            bookings: JSON.stringify([]),
-                        }
-                    },
                     description: `Slot Appuntamento con capacità: ${capacity}`,
                 };
 
@@ -337,10 +325,21 @@
                     resource: event,
                 });
 
-                console.log('Appuntamento creato:', response.result);
-                showMessage("Successo", `Slot appuntamento "${response.result.summary}" creato con successo!`);
+                const docRef = await addDoc(collection(db, `artifacts/${appId}/public/data/appointment_slots`), {
+                    eventId: response.result.id,
+                    ownerId: auth.currentUser.uid,
+                    calendarId: selectedCalendarId,
+                    summary: title,
+                    start: event.start.dateTime,
+                    end: event.end.dateTime,
+                    capacity: capacity,
+                    bookings: [],
+                });
+
+                console.log('Appuntamento creato:', docRef.id);
+                showMessage("Successo", `Slot appuntamento "${title}" creato con successo!`);
                 createForm.reset();
-                listAppointmentSlots(selectedCalendarId); // Aggiorna la lista
+                listAppointmentSlots(selectedCalendarId);
             } catch (err) {
                 console.error("Errore nella creazione dell'appuntamento:", err);
                 showMessage("Errore", "Si è verificato un errore durante la creazione dell'appuntamento.");
@@ -350,64 +349,74 @@
         // Funzione per listare gli slot di appuntamento
         async function listAppointmentSlots(calendarId) {
             try {
-                const response = await gapi.client.calendar.events.list({
-                    calendarId: calendarId,
-                    timeMin: (new Date()).toISOString(),
-                    showDeleted: false,
-                    singleEvents: true,
-                    q: 'Slot Appuntamento', // Filtra per la descrizione
-                    maxResults: 10,
+                const appointmentsCollectionRef = collection(db, `artifacts/${appId}/public/data/appointment_slots`);
+                
+                onSnapshot(appointmentsCollectionRef, async (snapshot) => {
+                    appointmentsList.innerHTML = '';
+                    if (snapshot.empty) {
+                        appointmentsList.innerHTML = '<p class="text-gray-500 text-sm">Nessun appuntamento futuro trovato per questo calendario.</p>';
+                        return;
+                    }
+                    
+                    snapshot.forEach(doc => {
+                        const appointment = doc.data();
+                        const docId = doc.id;
+                        
+                        const bookedCount = appointment.bookings.length;
+                        const capacity = appointment.capacity;
+
+                        const startDate = new Date(appointment.start);
+                        const endDate = new Date(appointment.end);
+                        const formatter = new Intl.DateTimeFormat('it-IT', { dateStyle: 'full', timeStyle: 'short' });
+
+                        const eventElement = document.createElement('div');
+                        eventElement.className = 'bg-white p-4 rounded-lg shadow border border-gray-200 flex flex-col sm:flex-row items-center justify-between';
+                        eventElement.innerHTML = `
+                            <div class="mb-2 sm:mb-0 sm:mr-4 flex-grow">
+                                <h3 class="font-bold text-gray-800">${appointment.summary}</h3>
+                                <p class="text-sm text-gray-600">${formatter.format(startDate)} - ${formatter.format(endDate)}</p>
+                                <p class="text-sm text-gray-500">Prenotazioni: ${bookedCount} / ${capacity}</p>
+                            </div>
+                            <div class="flex-shrink-0">
+                                <button class="copy-link-btn bg-purple-600 text-white text-xs font-semibold py-2 px-4 rounded-full shadow hover:bg-purple-700 transition duration-300" data-booking-id="${docId}">
+                                    Copia Link
+                                </button>
+                            </div>
+                        `;
+                        appointmentsList.appendChild(eventElement);
+                        
+                        // Sincronizza lo stato del calendario
+                        syncCalendarEvent(appointment);
+                    });
+                    
+                    document.querySelectorAll('.copy-link-btn').forEach(btn => {
+                        btn.addEventListener('click', (e) => {
+                            const bookingId = e.target.dataset.bookingId;
+                            const bookingLink = `${window.location.origin}${window.location.pathname}?bookingId=${bookingId}&isBooking=true`;
+                            copyToClipboard(bookingLink);
+                        });
+                    });
                 });
-                renderAppointmentSlots(response.result.items);
             } catch (err) {
                 console.error("Errore nel listare gli appuntamenti:", err);
                 appointmentsList.innerHTML = '<p class="text-red-500 text-sm">Errore nel caricamento degli appuntamenti.</p>';
             }
         }
-
-        // Renderizza la lista degli appuntamenti
-        function renderAppointmentSlots(events) {
-            appointmentsList.innerHTML = '';
-            if (events.length === 0) {
-                appointmentsList.innerHTML = '<p class="text-gray-500 text-sm">Nessun appuntamento futuro trovato per questo calendario.</p>';
-                return;
-            }
-            events.forEach(event => {
-                const capacity = event.extendedProperties?.shared?.capacity || 1;
-                const bookings = JSON.parse(event.extendedProperties?.shared?.bookings || '[]');
-                const bookedCount = bookings.length;
-
-                const startDate = new Date(event.start.dateTime);
-                const endDate = new Date(event.end.dateTime);
-                const formatter = new Intl.DateTimeFormat('it-IT', { dateStyle: 'full', timeStyle: 'short' });
-
-                const eventElement = document.createElement('div');
-                eventElement.className = 'bg-white p-4 rounded-lg shadow border border-gray-200 flex flex-col sm:flex-row items-center justify-between';
-                eventElement.innerHTML = `
-                    <div class="mb-2 sm:mb-0 sm:mr-4 flex-grow">
-                        <h3 class="font-bold text-gray-800">${event.summary}</h3>
-                        <p class="text-sm text-gray-600">${formatter.format(startDate)} - ${formatter.format(endDate)}</p>
-                        <p class="text-sm text-gray-500">Prenotazioni: ${bookedCount} / ${capacity}</p>
-                    </div>
-                    <div class="flex-shrink-0">
-                        <button class="copy-link-btn bg-purple-600 text-white text-xs font-semibold py-2 px-4 rounded-full shadow hover:bg-purple-700 transition duration-300" data-event-id="${event.id}" data-calendar-id="${event.organizer.email}">
-                            Copia Link
-                        </button>
-                    </div>
-                `;
-                appointmentsList.appendChild(eventElement);
-            });
-
-            // Aggiungi event listener ai nuovi pulsanti
-            document.querySelectorAll('.copy-link-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const eventId = e.target.dataset.eventId;
-                    const calendarId = e.target.dataset.calendarId;
-                    const bookingLink = `${window.location.origin}${window.location.pathname}?bookingId=${eventId}&calendarId=${calendarId}&isBooking=true`;
-                    copyToClipboard(bookingLink);
+        
+        async function syncCalendarEvent(appointment) {
+            try {
+                const newDescription = `Slot Appuntamento con capacità: ${appointment.capacity}\n\nPartecipanti:\n${appointment.bookings.map(b => `- ${b.name}`).join('\n')}`;
+                
+                await gapi.client.calendar.events.patch({
+                    calendarId: appointment.calendarId,
+                    eventId: appointment.eventId,
+                    resource: { description: newDescription },
                 });
-            });
+            } catch (err) {
+                console.error("Errore nella sincronizzazione del calendario:", err);
+            }
         }
+
 
         // Funzione per copiare il link negli appunti
         function copyToClipboard(text) {
@@ -421,30 +430,27 @@
         }
 
         // Gestione della vista per l'ospite
-        async function handleGuestView(eventId, calendarId) {
+        async function handleGuestView(bookingId) {
             ownerView.classList.add('hidden');
             guestView.classList.remove('hidden');
             loadingDiv.classList.remove('hidden');
+            
+            const docRef = doc(db, `artifacts/${appId}/public/data/appointment_slots`, bookingId);
 
-            try {
-                const response = await gapi.client.calendar.events.get({
-                    calendarId: calendarId,
-                    eventId: eventId
-                });
-                const event = response.result;
-                if (!event) {
+            onSnapshot(docRef, async (docSnap) => {
+                if (!docSnap.exists()) {
                     showMessage("Errore", "L'appuntamento non esiste più.");
                     loadingDiv.classList.add('hidden');
                     return;
                 }
+                
+                const appointment = docSnap.data();
+                const bookedCount = appointment.bookings.length;
+                const capacity = appointment.capacity;
 
-                const capacity = event.extendedProperties?.shared?.capacity || 1;
-                const bookings = JSON.parse(event.extendedProperties?.shared?.bookings || '[]');
-                const bookedCount = bookings.length;
-
-                bookingTitle.textContent = event.summary;
-                const startDate = new Date(event.start.dateTime);
-                const endDate = new Date(event.end.dateTime);
+                bookingTitle.textContent = appointment.summary;
+                const startDate = new Date(appointment.start);
+                const endDate = new Date(appointment.end);
                 const formatter = new Intl.DateTimeFormat('it-IT', { dateStyle: 'full', timeStyle: 'short' });
                 bookingDetails.textContent = `Orario: ${formatter.format(startDate)} - ${formatter.format(endDate)}`;
                 
@@ -453,15 +459,11 @@
                 bookingForm.addEventListener('submit', (e) => {
                     e.preventDefault();
                     const guestName = document.getElementById('guest-name').value;
-                    bookAppointment(eventId, calendarId, guestName, event);
+                    bookAppointment(docRef, guestName, appointment);
                 });
-
-            } catch (err) {
-                console.error("Errore nel caricare l'evento di prenotazione:", err);
-                showMessage("Errore", "Impossibile caricare i dettagli dell'appuntamento.");
-            } finally {
-                loadingDiv.classList.add('hidden');
-            }
+            });
+            
+            loadingDiv.classList.add('hidden');
         }
 
         // Aggiorna lo stato della prenotazione
@@ -482,9 +484,9 @@
         }
 
         // Funzione per prenotare un appuntamento
-        async function bookAppointment(eventId, calendarId, guestName, event) {
-            let bookings = JSON.parse(event.extendedProperties?.shared?.bookings || '[]');
-            const capacity = event.extendedProperties?.shared?.capacity || 1;
+        async function bookAppointment(docRef, guestName, appointment) {
+            let bookings = appointment.bookings;
+            const capacity = appointment.capacity;
 
             if (bookings.length >= capacity) {
                 showMessage("Errore", "Questo slot è già al completo.");
@@ -494,24 +496,7 @@
             bookings.push({ name: guestName, timestamp: new Date().toISOString() });
 
             try {
-                const updatedEvent = {
-                    extendedProperties: {
-                        shared: {
-                            capacity: capacity.toString(),
-                            bookings: JSON.stringify(bookings),
-                        }
-                    }
-                };
-                
-                // Aggiorna la descrizione con le prenotazioni
-                const newDescription = `Slot Appuntamento con capacità: ${capacity}\n\nPartecipanti:\n${bookings.map(b => `- ${b.name}`).join('\n')}`;
-                updatedEvent.description = newDescription;
-
-                const response = await gapi.client.calendar.events.patch({
-                    calendarId: calendarId,
-                    eventId: eventId,
-                    resource: updatedEvent,
-                });
+                await updateDoc(docRef, { bookings: bookings });
                 
                 const bookedCount = bookings.length;
                 updateBookingStatus(bookedCount, capacity);
@@ -525,7 +510,15 @@
         }
 
         // Inizializzazione quando il DOM è pronto
-        window.onload = () => {
+        window.onload = async () => {
+            if (firebaseConfig) {
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            }
+            
             // Avvia il caricamento delle librerie
             gapi.load('client', gapiLoaded);
             window.gapiLoaded = gapiLoaded;
@@ -537,11 +530,10 @@
 
             const params = new URLSearchParams(window.location.search);
             const bookingId = params.get('bookingId');
-            const calendarId = params.get('calendarId');
             const isBooking = params.get('isBooking');
 
             if (isBooking) {
-                if (!bookingId || !calendarId) {
+                if (!bookingId) {
                     showMessage("Link Incompleto", "Il link di prenotazione è incompleto. Assicurati di copiare e condividere l'intero URL generato dall'applicazione.");
                     authButtons.classList.remove('hidden');
                 } else {
