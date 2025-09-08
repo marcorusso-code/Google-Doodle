@@ -118,30 +118,20 @@
 
         </div>
     </div>
-    <!-- Firebase Imports -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, addDoc, setDoc, getDoc, onSnapshot, collection, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        const CLIENT_ID = '1062046351666-cnbek28i76lgqbte85ssre7a3qui9gl1.apps.googleusercontent.com';
+        const API_KEY = 'AIzaSyASCrBXFbsyZdk-tLbAVWRwce4lGaZ5XjU';
+        const SCOPES = 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly';
 
-        /*
-         * Variabili globali per l'ambiente Canvas. NON MODIFICARE.
-         */
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
         let db, auth;
-
-        // Inizializzazione Firebase
-        if (firebaseConfig) {
-            const app = initializeApp(firebaseConfig);
-            db = getFirestore(app);
-            auth = getAuth(app);
-        } else {
-            console.error("Firebase config non disponibile.");
-        }
-        
         let gapiInited = false;
         let gisInited = false;
         let tokenClient;
@@ -169,7 +159,14 @@
         const messageContent = document.getElementById('message-content');
         const messageOkButton = document.getElementById('message-ok');
 
-        // Funzione per mostrare un messaggio personalizzato
+        if (firebaseConfig) {
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+        } else {
+            console.error("Firebase config non disponibile.");
+        }
+
         function showMessage(title, message) {
             messageTitle.textContent = title;
             messageContent.textContent = message;
@@ -177,18 +174,15 @@
             messageBox.classList.add('flex');
         }
 
-        // Gestore del click sul pulsante OK del messaggio
         messageOkButton.addEventListener('click', () => {
             messageBox.classList.add('hidden');
             messageBox.classList.remove('flex');
         });
 
-        // Caricamento della libreria gapi
         function gapiLoaded() {
             gapi.load('client', initializeGapiClient);
         }
 
-        // Inizializzazione del client gapi
         async function initializeGapiClient() {
             try {
                 await gapi.client.init({
@@ -203,7 +197,6 @@
             }
         }
 
-        // Caricamento della libreria gis
         function gisLoaded() {
             tokenClient = google.accounts.oauth2.initTokenClient({
                 client_id: CLIENT_ID,
@@ -214,7 +207,6 @@
             maybeEnableButtons();
         }
 
-        // Controlla se le librerie sono pronte e abilita il pulsante di autorizzazione
         function maybeEnableButtons() {
             if (gapiInited && gisInited) {
                 const params = new URLSearchParams(window.location.search);
@@ -232,7 +224,6 @@
             }
         }
 
-        // Gestisce il flusso di autorizzazione
         function handleAuthClick() {
             tokenClient.callback = async (resp) => {
                 if (resp.error !== undefined) {
@@ -266,7 +257,6 @@
             }
         }
 
-        // Funzione per listare i calendari dell'utente
         async function listCalendars() {
             try {
                 const response = await gapi.client.calendar.calendarList.list();
@@ -282,7 +272,6 @@
             }
         }
 
-        // Renderizza il dropdown dei calendari
         function renderCalendars() {
             calendarSelect.innerHTML = '';
             calendars.forEach(calendar => {
@@ -293,13 +282,11 @@
             });
         }
 
-        // Gestisce la selezione di un calendario
         calendarSelect.addEventListener('change', (e) => {
             selectedCalendarId = e.target.value;
             listAppointmentSlots(selectedCalendarId);
         });
 
-        // Gestisce l'invio del form di creazione appuntamento
         createForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const title = document.getElementById('event-title').value;
@@ -346,7 +333,6 @@
             }
         });
 
-        // Funzione per listare gli slot di appuntamento
         async function listAppointmentSlots(calendarId) {
             try {
                 const appointmentsCollectionRef = collection(db, `artifacts/${appId}/public/data/appointment_slots`);
@@ -385,7 +371,6 @@
                         `;
                         appointmentsList.appendChild(eventElement);
                         
-                        // Sincronizza lo stato del calendario
                         syncCalendarEvent(appointment);
                     });
                     
@@ -418,7 +403,6 @@
         }
 
 
-        // Funzione per copiare il link negli appunti
         function copyToClipboard(text) {
             const textarea = document.createElement('textarea');
             textarea.value = text;
@@ -429,7 +413,6 @@
             showMessage("Link Copiato!", "Il link per la prenotazione è stato copiato negli appunti.");
         }
 
-        // Gestione della vista per l'ospite
         async function handleGuestView(bookingId) {
             ownerView.classList.add('hidden');
             guestView.classList.remove('hidden');
@@ -466,7 +449,6 @@
             loadingDiv.classList.add('hidden');
         }
 
-        // Aggiorna lo stato della prenotazione
         function updateBookingStatus(bookedCount, capacity) {
             bookingStatusDiv.classList.remove('hidden');
             if (bookedCount >= capacity) {
@@ -483,7 +465,6 @@
             }
         }
 
-        // Funzione per prenotare un appuntamento
         async function bookAppointment(docRef, guestName, appointment) {
             let bookings = appointment.bookings;
             const capacity = appointment.capacity;
@@ -509,7 +490,6 @@
             }
         }
 
-        // Inizializzazione quando il DOM è pronto
         window.onload = async () => {
             if (firebaseConfig) {
                 if (initialAuthToken) {
@@ -519,7 +499,6 @@
                 }
             }
             
-            // Avvia il caricamento delle librerie
             gapi.load('client', gapiLoaded);
             window.gapiLoaded = gapiLoaded;
             
